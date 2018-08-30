@@ -1,0 +1,26 @@
+{
+  "name": "is06demo",
+  "version": "1.0.0",
+  "description": "Demo project for IS-06 October interop for showcase purposes",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "nodemon index.js"
+  },
+  "keywords": [
+    "is06",
+    "demo",
+    "interop"
+  ],
+  "author": "Alexander Tyutyarev",
+  "license": "ISC",
+  "dependencies": {
+    "body-parser": "^1.18.3",
+    "express": "^4.16.3",
+    "request": "^2.88.0",
+    "winston": "^2.4.1"
+  },
+  "devDependencies": {
+    "nodemon": "^1.18.3"
+  }
+}
