@@ -19,6 +19,7 @@ const logger = new (winston.Logger)({
 var api = "http://127.0.0.1:8081/x-nmos/netctrl/v1.0"
 var endpoints = []
 var flows = []
+var time = 2000
 
 processCLIArgs = async () => {
     process.argv.forEach((val, index, array) => {
@@ -39,11 +40,9 @@ processCLIArgs = async () => {
       logger.info('NC API is located on ' + api)
       await checkAPIAvailability(api)
       endpoints = await getEndpointList(api)
-      console.log(endpoints)
       flows = await getFlowList(api)
-      console.log(flows)
-      
-      
+        let update = await selectReceiver(flows, endpoints)
+        await changeReceiver(api, update, time)
       logger.info('Initialization is complete!')
     } catch (error) {
       logger.error('Error on initialization is thrown!')
@@ -53,6 +52,7 @@ processCLIArgs = async () => {
 
   var server = app.listen(1337, () => {
     initServer()
+    
 
   })
 
@@ -120,24 +120,58 @@ processCLIArgs = async () => {
 
   selectReceiver = (flows, endpoints) => {
     return new Promise((resolve, reject) => {
-      let flow = flows[getRandomInt(flow.length)]
-      let sender = endpoints.filter(ep => ep.id === flows.sender_endpoint_id)[0]
-      let removedReceiverID = flow.receiver_endpoints_ids[getRandomInt(flow.receiver_endpoint_ids.length)]
+      logger.info('Selecting receiver.')
+      let flow = flows[getRandomInt(flows.length)]
+      let sender = (endpoints.filter(ep =>  ep.id === flow.sender_endpoint_id))[0]
+      let removedReceiverID = flow.receiver_endpoint_ids[getRandomInt(flow.receiver_endpoint_ids.length)]
       let receivers = endpoints.filter(ep => (ep.role === 'receiver' || ep.role === 'both') &&
-                                              ep.id !== removedReceiverID &&
+                                              // ep.id !== removedReceiverID &&
                                               ep.attached_network_device.chassis_id === sender.attached_network_device.chassis_id)
-      let addedReceiverID = receivers[getRandomInt(receivers.length)].id 
+      let addedReceiverID = receivers[getRandomInt(receivers.length)].id
       let update = {}
       update.removed = removedReceiverID
-      updated.added = addedReceiverID
+      update.added = addedReceiverID
+      update.flow = flow.id
       resolve(update)
     })
   }  
 
-  changeReceiver = (api_link) => {
+  changeReceiver = (api_link, update, time) => {
     return new Promise((resolve, reject) => {
-      api_link += '/endpoints'
-      
+      api_link += '/network-flows/' + update.flow + '/receivers'
+      setTimeout(() => {
+        if (!update.removed)
+          logger.warn('No available receiver to remove. Moving on.')
+        else
+          request.delete(api_link + '/' + update.removed, function (error, response, body) {
+            if (!error && (response.statusCode === 204 || response.statusCode === 200)) {
+              logger.info('Removing receiver ' + update.removed)
+            } else {
+              logger.error('Can\'t remove receiver ' + update.removed + ': ' + error)
+            }
+          })
+
+        setTimeout(() => {
+          if (!update.added)
+            logger.warn('No available receiver to add. Moving on.')
+          else {
+            let postBody = {}
+            postBody.receiver_endpoint_ids = []
+            postBody.receiver_endpoint_ids.push(update.added)
+            request.post({
+                headers: {'content-type': 'application/json'},
+                url:     api_link,
+                json:    postBody
+            }, function(error, response, body){
+              if (!error && (response.statusCode === 204 || response.statusCode === 200)) {
+                logger.info('Adding receiver ' + update.added)
+              } else {
+                logger.error('Can\'t add receiver ' + update.added + ': ' + error)
+              }
+            })
+          }
+        }, time)
+      }, time)
     })
   } 
 
