@@ -33,27 +33,40 @@ processCLIArgs = async () => {
     })
   }
 
-  initServer = async () => {
-    try {
-      await processCLIArgs()
-      logger.info('Starting demo app initialization.')
-      logger.info('NC API is located on ' + api)
-      await checkAPIAvailability(api)
-      endpoints = await getEndpointList(api)
-      flows = await getFlowList(api)
-        let update = await selectReceiver(flows, endpoints)
-        await changeReceiver(api, update, time)
-      logger.info('Initialization is complete!')
-    } catch (error) {
-      logger.error('Error on initialization is thrown!')
-      throw error
-    }
+  initServer = () => {
+    return new Promise(async (resolve, reject) => { 
+        try {
+          await processCLIArgs()
+          logger.info('Starting demo app initialization.')
+          logger.info('NC API is located on ' + api)
+          await checkAPIAvailability(api)
+          endpoints = await getEndpointList(api)
+          flows = await getFlowList(api)
+          logger.info('Initialization is complete!')
+          resolve()
+        } catch (error) {
+          logger.error('Error on initialization is thrown!')
+          reject(error)
+        }
+    })
   }
 
-  var server = app.listen(1337, () => {
-    initServer()
-    
+  run = () => {
+    return new Promise(async (resolve, reject) => {
+      var flow = await selectFlow(flows)
+      while(true) {
+        logger.info('----------------------------')
+        let update = await selectReceiver(flow, endpoints)
+        await changeReceiver(api, update, time)
+        flow = await updateFlowInfo(api, flow.id)
+      }
+      resolve()
+    })
+  }
 
+  var server = app.listen(1337, async () => {
+    await initServer()
+    await run()
   })
 
 
@@ -95,7 +108,7 @@ processCLIArgs = async () => {
     })
   }
 
-  getFlowList = (api_link) => {
+  getFlowList = api_link => {
     return new Promise((resolve, reject) => {
       api_link += '/network-flows'
       var flows = []
@@ -117,20 +130,54 @@ processCLIArgs = async () => {
     })
   }
 
+  updateFlowInfo = (api_link, flowId) => {
+      return new Promise((resolve, reject) => {
+        api_link += '/network-flows/' + flowId
+        request.get(api_link, function (error, response, body) {
+            if (!error && response.statusCode == 200) {
+            logger.info('Updating ' + flowId + ' flow info.')
+            flow = JSON.parse(body)
+            if (!flow) 
+                  reject(new Error('No flows available.')) 
+              else 
+                  resolve(flow)
+            } else {
+              logger.error('Can\'t get flow.')
+              console.log(error)
+              reject(error)
+            }
+          })
+      })
+  }
 
-  selectReceiver = (flows, endpoints) => {
+
+  selectFlow = flows => {
+    return new Promise((resolve, reject) => {
+      logger.info('Selecting flow.')
+      let flow = flows[getRandomInt(flows.length)]
+      if (flow)
+        resolve(flow)
+      else 
+        reject(new Error('Lacking flow.'))
+    })
+  }  
+
+
+  selectReceiver = (flow, endpoints) => {
     return new Promise((resolve, reject) => {
       logger.info('Selecting receiver.')
-      let flow = flows[getRandomInt(flows.length)]
       let sender = (endpoints.filter(ep =>  ep.id === flow.sender_endpoint_id))[0]
       let removedReceiverID = flow.receiver_endpoint_ids[getRandomInt(flow.receiver_endpoint_ids.length)]
       let receivers = endpoints.filter(ep => (ep.role === 'receiver' || ep.role === 'both') &&
-                                              // ep.id !== removedReceiverID &&
+                                               ep.id !== removedReceiverID &&
+                                              !flow.receiver_endpoint_ids.includes(ep.id) &&
                                               ep.attached_network_device.chassis_id === sender.attached_network_device.chassis_id)
-      let addedReceiverID = receivers[getRandomInt(receivers.length)].id
       let update = {}
+      if(receivers.length){
+        let addedReceiverID = receivers[getRandomInt(receivers.length)].id
+        update.added = addedReceiverID
+      }
       update.removed = removedReceiverID
-      update.added = addedReceiverID
       update.flow = flow.id
       resolve(update)
     })
@@ -153,7 +200,10 @@ processCLIArgs = async () => {
 
         setTimeout(() => {
           if (!update.added)
+          {
             logger.warn('No available receiver to add. Moving on.')
+            resolve()
+          }
           else {
             let postBody = {}
             postBody.receiver_endpoint_ids = []
@@ -168,6 +218,7 @@ processCLIArgs = async () => {
               } else {
                 logger.error('Can\'t add receiver ' + update.added + ': ' + error)
               }
+              resolve()
             })
           }
         }, time)
